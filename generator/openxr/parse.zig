@@ -23,7 +23,7 @@ pub fn parseXml(backing_allocator: Allocator, root: *xml.Element) !ParseResult {
 
     const allocator = arena.allocator();
 
-    var reg = registry.Registry{
+    const reg = registry.Registry{
         .decls = try parseDeclarations(allocator, root),
         .api_constants = try parseApiConstants(allocator, root),
         .tags = try parseTags(allocator, root),
@@ -38,8 +38,8 @@ pub fn parseXml(backing_allocator: Allocator, root: *xml.Element) !ParseResult {
 }
 
 fn parseDeclarations(allocator: Allocator, root: *xml.Element) ![]registry.Declaration {
-    var types_elem = root.findChildByTag("types") orelse return error.InvalidRegistry;
-    var commands_elem = root.findChildByTag("commands") orelse return error.InvalidRegistry;
+    const types_elem = root.findChildByTag("types") orelse return error.InvalidRegistry;
+    const commands_elem = root.findChildByTag("commands") orelse return error.InvalidRegistry;
 
     const decl_upper_bound = types_elem.children.len + commands_elem.children.len;
     const decls = try allocator.alloc(registry.Declaration, decl_upper_bound);
@@ -483,7 +483,8 @@ fn parseCommand(allocator: Allocator, elem: *xml.Element) !registry.Declaration 
 
             const old_error_codes = error_codes;
             error_codes = try allocator.alloc([]const u8, error_codes.len + 1);
-            mem.copy([]const u8, error_codes, old_error_codes);
+            std.mem.copyForwards([]const u8, error_codes, old_error_codes);
+            // mem.copyForward([]const u8, error_codes, old_error_codes);
             error_codes[error_codes.len - 1] = code;
             allocator.free(old_error_codes);
             break;

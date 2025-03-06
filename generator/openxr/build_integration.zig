@@ -10,12 +10,12 @@ pub const GenerateStep = struct {
     step: Build.Step,
     generated_file: Build.GeneratedFile,
     /// The path to xr.xml
-    spec_path: []const u8,
+    spec_path: Build.LazyPath,
 
     /// Initialize an OpenXR generation step, for `builder`. `spec_path` is the path to
     /// xr.xml, relative to the project root. The generated bindings will be placed at
     /// `out_path`, which is relative to the zig-cache directory.
-    pub fn create(builder: *Build, spec_path: []const u8) *GenerateStep {
+    pub fn create(builder: *Build, spec_path: Build.LazyPath) *GenerateStep {
         const self = builder.allocator.create(GenerateStep) catch unreachable;
         self.* = .{
             .step = Build.Step.init(.{
@@ -36,19 +36,24 @@ pub const GenerateStep = struct {
     /// root. Typically, the location of the LunarG SDK root can be retrieved by querying for the OPENXR_SDK
     /// environment variable, set by activating the environment setup script located in the SDK root.
     /// `builder` and `out_path` are used in the same manner as `init`.
-    pub fn createFromSdk(builder: *Build, sdk_path: []const u8, output_name: []const u8) *GenerateStep {
-        const spec_path = std.fs.path.join(
-            builder.allocator,
-            &[_][]const u8{ sdk_path, "share/openxr/registry/xr.xml" },
-        ) catch unreachable;
+    // pub fn createFromSdk(builder: *Build, sdk_path: []const u8, output_name: []const u8) *GenerateStep {
+    //     const spec_path = std.fs.path.join(
+    //         builder.allocator,
+    //         &[_][]const u8{ sdk_path, "share/openxr/registry/xr.xml" },
+    //     ) catch unreachable;
 
-        return create(builder, spec_path, output_name);
-    }
+    //     return create(builder, spec_path, output_name);
+    // }
 
     /// Returns the module with the generated bindings, with name `module_name`.
-    pub fn getModule(self: *GenerateStep) *Build.Module {
-        return self.step.owner.createModule(.{
-            .source_file = self.getSource(),
+    pub fn getModule(self: *@This()) *Build.Module {
+        const b = self.step.owner;
+        return b.createModule(.{
+            .root_source_file = Build.LazyPath{
+                .generated = .{
+                    .file = &self.generated_file,
+                },
+            },
         });
     }
 
@@ -61,16 +66,17 @@ pub const GenerateStep = struct {
     /// the final bindings. The resulting generated bindings are not formatted, which is why an ArrayList
     /// writer is passed instead of a file writer. This is then formatted into standard formatting
     /// by parsing it and rendering with `std.zig.parse` and `std.zig.render` respectively.
-    fn make(step: *Build.Step, progress: *std.Progress.Node) !void {
+    fn make(step: *Build.Step, progress: std.Progress.Node) !void {
         _ = progress;
         const b = step.owner;
-        const self = @fieldParentPtr(GenerateStep, "step", step);
+        const self: *GenerateStep = @fieldParentPtr("step", step);
         const cwd = std.fs.cwd();
 
-        var man = b.cache.obtain();
+        var man = b.graph.cache.obtain();
         defer man.deinit();
 
-        const spec = try cwd.readFileAlloc(b.allocator, self.spec_path, std.math.maxInt(usize));
+        const specPath = self.spec_path.getPath2(step.owner, step);
+        const spec = try cwd.readFileAlloc(b.allocator, specPath, std.math.maxInt(usize));
         // TODO: Look into whether this is the right way to be doing
         // this - maybe the file-level caching API has some benefits I
         // don't understand.
@@ -117,8 +123,10 @@ pub const GenerateStep = struct {
             std.debug.print("unable to make path {s}: {s}\n", .{ output_dir_path, @errorName(err) });
             return err;
         };
-
-        try cwd.writeFile(output_file_path, formatted);
+        try cwd.writeFile(.{
+            .sub_path = output_file_path,
+            .data = formatted,
+        });
         self.generated_file.path = output_file_path;
         try step.writeManifest(&man);
     }
